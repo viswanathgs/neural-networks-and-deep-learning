@@ -12,6 +12,7 @@ and omits many desirable features.
 #### Libraries
 # Standard library
 import random
+import time
 
 # Third-party libraries
 import numpy as np
@@ -53,6 +54,7 @@ class Network(object):
         tracking progress, but slows things down substantially."""
         if test_data: n_test = len(test_data)
         n = len(training_data)
+        start_time = time.time()
         for j in xrange(epochs):
             random.shuffle(training_data)
             mini_batches = [
@@ -60,23 +62,21 @@ class Network(object):
                 for k in xrange(0, n, mini_batch_size)]
             for mini_batch in mini_batches:
                 self.update_mini_batch(mini_batch, eta)
+            elapsed_time = time.time() - start_time
             if test_data:
-                print "Epoch {0}: {1} / {2}".format(
-                    j, self.evaluate(test_data), n_test)
+                print "Epoch {0}: {1} / {2}. Elapsed Time: {3}s".format(
+                    j, self.evaluate(test_data), n_test, elapsed_time)
             else:
-                print "Epoch {0} complete".format(j)
+                print "Epoch {0} complete. Elapsed Time: {3}s".format(
+                    j, elapsed_time)
 
     def update_mini_batch(self, mini_batch, eta):
         """Update the network's weights and biases by applying
         gradient descent using backpropagation to a single mini batch.
         The ``mini_batch`` is a list of tuples ``(x, y)``, and ``eta``
         is the learning rate."""
-        nabla_b = [np.zeros(b.shape) for b in self.biases]
-        nabla_w = [np.zeros(w.shape) for w in self.weights]
-        for x, y in mini_batch:
-            delta_nabla_b, delta_nabla_w = self.backprop(x, y)
-            nabla_b = [nb+dnb for nb, dnb in zip(nabla_b, delta_nabla_b)]
-            nabla_w = [nw+dnw for nw, dnw in zip(nabla_w, delta_nabla_w)]
+        trainX, trainY = convert_to_matrix(mini_batch)
+        nabla_b, nabla_w = self.backprop(trainX, trainY)
         self.weights = [w-(eta/len(mini_batch))*nw
                         for w, nw in zip(self.weights, nabla_w)]
         self.biases = [b-(eta/len(mini_batch))*nb
@@ -101,7 +101,10 @@ class Network(object):
         # backward pass
         delta = self.cost_derivative(activations[-1], y) * \
             sigmoid_prime(zs[-1])
-        nabla_b[-1] = delta
+        # sum and reshape after vectorization
+        nabla_b[-1] = delta.sum(axis=1)
+        nabla_b[-1] = nabla_b[-1].reshape(len(nabla_b[-1]), 1)
+        # No sum needed here, dot() takes care of it 
         nabla_w[-1] = np.dot(delta, activations[-2].transpose())
         # Note that the variable l in the loop below is used a little
         # differently to the notation in Chapter 2 of the book.  Here,
@@ -113,7 +116,8 @@ class Network(object):
             z = zs[-l]
             sp = sigmoid_prime(z)
             delta = np.dot(self.weights[-l+1].transpose(), delta) * sp
-            nabla_b[-l] = delta
+            nabla_b[-l] = delta.sum(axis=1)
+            nabla_b[-l] = nabla_b[-l].reshape(len(nabla_b[-l]), 1)
             nabla_w[-l] = np.dot(delta, activations[-l-1].transpose())
         return (nabla_b, nabla_w)
 
@@ -122,9 +126,10 @@ class Network(object):
         network outputs the correct result. Note that the neural
         network's output is assumed to be the index of whichever
         neuron in the final layer has the highest activation."""
-        test_results = [(np.argmax(self.feedforward(x)), y)
-                        for (x, y) in test_data]
-        return sum(int(x == y) for (x, y) in test_results)
+        testX, testY = convert_to_matrix(test_data)
+        outputs = self.feedforward(testX)
+        results = [np.argmax(out_layer) for out_layer in outputs.T]
+        return sum(int(x[0] == y) for (x, y) in zip(testY.T, results))
 
     def cost_derivative(self, output_activations, y):
         """Return the vector of partial derivatives \partial C_x /
@@ -139,3 +144,10 @@ def sigmoid(z):
 def sigmoid_prime(z):
     """Derivative of the sigmoid function."""
     return sigmoid(z)*(1-sigmoid(z))
+
+def convert_to_matrix(data):
+    xLen = len(data[0][0])
+    yLen = len(data[0][1]) if isinstance(data[0][1], np.ndarray) else 1
+    xMat = np.asarray([x.reshape(xLen) for (x, y) in data])
+    yMat = np.asarray([y.reshape(yLen) for (x, y) in data])
+    return xMat.T, yMat.T
